@@ -180,6 +180,13 @@ label.chk input{width:24px;height:24px;flex:none;accent-color:var(--peach)}
 /* 換人 */
 .pass .ava{width:140px;height:140px;margin:0 auto 6px;animation:bob 2.2s ease-in-out infinite}
 .pass .btn{margin-top:8px;width:100%}
+.pw{margin:4px 0 6px}
+.pw-label{font-weight:800;margin:0 0 8px}
+.pw-in{display:block;width:100%;max-width:240px;margin:0 auto 8px;text-align:center;font-family:var(--num);font-size:28px;font-weight:800;letter-spacing:14px;text-transform:uppercase;padding:8px 0 6px 14px;border:3px solid var(--ink);border-radius:14px;background:#f4fbff;color:var(--ink)}
+.pw-in::placeholder{letter-spacing:4px;font-size:16px;color:#9bb3c6}
+.pw-in:focus{outline:none;box-shadow:0 0 0 4px var(--sun)}
+.pw-err{min-height:22px;margin:0;color:var(--hit);font-weight:800;font-size:14px}
+.linkbtn{margin-top:10px;background:none;border:0;color:var(--muted);text-decoration:underline;font-size:14px;font-weight:700}
 
 /* 結束 */
 .trophy{width:120px;margin:4px auto 0;animation:bob 2s ease-in-out infinite}
@@ -264,6 +271,7 @@ label.chk input{width:24px;height:24px;flex:none;accent-color:var(--peach)}
       </select>
     </label>
     <div class="fleet-info" id="fleet-info"></div>
+    <label class="chk"><input type="checkbox" id="opt-pw" checked>換人時要輸入 3 位數字密碼（防偷看）</label>
     <label class="chk"><input type="checkbox" id="opt-chain" checked>命中後可以再開一砲</label>
     <label class="chk"><input type="checkbox" id="opt-noadj">船艦之間不可相鄰（含斜角）</label>
     <div style="margin-top:12px"><button class="btn primary big-btn" id="btn-start">出航！開始佈陣</button></div>
@@ -298,7 +306,14 @@ label.chk input{width:24px;height:24px;flex:none;accent-color:var(--peach)}
     <div class="ava" id="pass-ava"></div>
     <h2 id="pass-title"></h2>
     <p id="pass-msg" class="hint"></p>
+    <div class="pw" id="pw-box" hidden>
+      <p class="pw-label" id="pw-label"></p>
+      <input type="text" id="pw1" class="pw-in" maxlength="3" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="000" aria-label="密碼">
+      <input type="text" id="pw2" class="pw-in" maxlength="3" inputmode="numeric" pattern="[0-9]*" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="再輸入一次" aria-label="再輸入一次密碼">
+      <p class="pw-err" id="pw-err"></p>
+    </div>
     <button class="btn team" id="btn-pass"></button>
+    <button class="linkbtn" id="pw-forgot" hidden>忘記密碼？</button>
   </div>
 </section>
 
@@ -785,13 +800,59 @@ function show(id){
   if (id === 's-setup') setTeam(0);
   window.scrollTo(0, 0);
 }
+/* ---------- 換人密碼 ---------- */
+const normPw = s => (s || '').replace(/[^0-9]/g, '').slice(0, 3);
+let pwMode = 'off', pwPlayer = null, pwNext = null;
+function updatePassBtn(){
+  const a = $('pw1').value.length, b = $('pw2').value.length;
+  $('btn-pass').disabled = pwMode === 'set' ? (a !== 3 || b !== 3) : pwMode === 'check' ? a !== 3 : false;
+}
+function setupPw(idx){
+  const p = P[idx];
+  if (p.pw && !/^[0-9]{3}$/.test(p.pw)) p.pw = null; // 舊版字母密碼改為重新設定
+  pwPlayer = p;
+  pwMode = cfg.pw === false ? 'off' : (p.pw ? 'check' : 'set');
+  $('pw-box').hidden = pwMode === 'off';
+  $('pw-forgot').hidden = pwMode !== 'check';
+  $('pw2').hidden = pwMode !== 'set';
+  $('pw1').value = $('pw2').value = ''; $('pw-err').textContent = '';
+  $('pw1').placeholder = pwMode === 'set' ? '設定密碼' : '000';
+  $('pw-label').textContent = pwMode === 'set'
+    ? `${p.name}，請設定 3 位數字當密碼，之後每次換到你都要輸入。`
+    : `${p.name}，請輸入你的 3 位數字密碼`;
+  updatePassBtn();
+}
+function pwFail(msg){
+  $('pw-err').textContent = msg;
+  $('pw1').value = $('pw2').value = '';
+  shake($('pw-box')); updatePassBtn();
+  try { $('pw1').focus(); } catch(e){}
+}
+function passGo(){
+  if (pwMode === 'set'){
+    const a = normPw($('pw1').value), b = normPw($('pw2').value);
+    if (a.length !== 3) return pwFail('密碼要剛好 3 位數字');
+    if (a !== b) return pwFail('兩次輸入的密碼不一樣，請重新輸入');
+    pwPlayer.pw = a;
+  } else if (pwMode === 'check'){
+    if (normPw($('pw1').value) !== pwPlayer.pw) return pwFail('密碼不對喔！再試一次');
+  }
+  pwMode = 'off'; $('pw1').value = $('pw2').value = '';
+  const next = pwNext; pwNext = null; next && next();
+}
 function showPass(team, title, msg, btn, next){
-  setTeam(P[team] ? P[team].team : team);
-  $('pass-ava').innerHTML = captainSVG(P[team] ? P[team].team : team);
+  const p = P[team];
+  setTeam(p ? p.team : team);
+  $('pass-ava').innerHTML = captainSVG(p ? p.team : team);
   $('pass-title').textContent = title;
+  // 提醒：對手重設過密碼
+  const other = P[1 - team];
+  if (other && other.pwReset){ msg = (msg ? msg + '　' : '') + `注意：${other.name} 剛剛重設過密碼。`; other.pwReset = false; }
   $('pass-msg').textContent = msg;
   $('btn-pass').textContent = btn;
-  $('btn-pass').onclick = next;
+  pwNext = next;
+  $('btn-pass').onclick = passGo;
+  setupPw(team);
   show('s-pass');
   sfx.play('turn');
 }
@@ -967,7 +1028,7 @@ $('btn-music').onclick = () => sfx.toggleMusic();
 $('btn-start').onclick = () => {
   if (loadSave() && !confirm('開新局會覆蓋尚未結束的那一局，確定嗎？')) return;
   clearSave();
-  cfg = {noAdj:$('opt-noadj').checked, chain:$('opt-chain').checked, size:+$('opt-size').value};
+  cfg = {noAdj:$('opt-noadj').checked, chain:$('opt-chain').checked, size:+$('opt-size').value, pw:$('opt-pw').checked};
   N = cfg.size; rebuildGrids();
   P = [newPlayer($('n1').value.trim() || '玩家一', 0), newPlayer($('n2').value.trim() || '玩家二', 1)];
   showPass(0, `請把裝置交給 ${P[0].name}`, '另一位船長請先轉過頭去，不可以偷看喔！', `我是 ${P[0].name}，開始佈陣`, () => startPlace(0));
@@ -996,6 +1057,16 @@ $('btn-surrender').onclick = () => {
   gameOver(1 - cp, `${P[cp].name} 舉白旗投降`);
 };
 $('btn-resume').onclick = resume;
+['pw1', 'pw2'].forEach(id => {
+  $(id).addEventListener('input', e => { e.target.value = normPw(e.target.value); $('pw-err').textContent = ''; updatePassBtn(); });
+  $(id).addEventListener('keydown', e => { if (e.key === 'Enter' && !$('btn-pass').disabled) passGo(); });
+});
+$('pw-forgot').onclick = () => {
+  if (!pwPlayer) return;
+  if (!confirm(`確定要重設 ${pwPlayer.name} 的密碼嗎？\n重設後請重新設定新密碼，對手下次換人時會看到「已重設密碼」的提醒。`)) return;
+  pwPlayer.pw = null; pwPlayer.pwReset = true;
+  setupPw(P.indexOf(pwPlayer));
+};
 $('btn-discard').onclick = () => { if (!confirm('確定捨棄這局？捨棄後無法復原。')) return; clearSave(); refreshResume(); };
 document.addEventListener('click', e => { const b = e.target.closest('.btn'); if (b && !['btn-random','btn-rotate','btn-fire'].includes(b.id)) sfx.play('click'); });
 document.addEventListener('keydown', e => {
